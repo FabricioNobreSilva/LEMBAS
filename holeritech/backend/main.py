@@ -18,7 +18,7 @@ import logger as _logger_setup  # Inicializa o logger ao importar
 from loguru import logger
 from models import FileResult, ProcessSummary
 from renamer import process_files
-from updater import check_for_updates
+from updater import check_for_updates, do_update
 from logger import get_log_path, get_log_dir
 
 
@@ -116,11 +116,21 @@ def handle_get_log(args: argparse.Namespace) -> None:
     })
 
 
+def handle_do_update(args: argparse.Namespace) -> None:
+    """Baixa e instala a atualização silenciosamente."""
+    download_url: str = getattr(args, "download_url", "")
+    if not download_url:
+        emit("error", {"message": "URL de download não fornecida."})
+        sys.exit(1)
+    do_update(download_url, emit)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="HoleriTech Backend")
-    parser.add_argument("--mode", required=True, choices=["process", "check_update", "get_log"])
+    parser.add_argument("--mode", required=True, choices=["process", "check_update", "get_log", "do_update"])
     parser.add_argument("--inputs", default="[]", help="JSON array de caminhos de entrada")
     parser.add_argument("--output", default="", help="Diretório de saída")
+    parser.add_argument("--download-url", default="", dest="download_url", help="URL do instalador para atualização")
     args = parser.parse_args()
 
     if args.mode == "process":
@@ -129,6 +139,8 @@ def main() -> None:
         handle_check_update()
     elif args.mode == "get_log":
         handle_get_log(args)
+    elif args.mode == "do_update":
+        handle_do_update(args)
 
 
 if __name__ == "__main__":

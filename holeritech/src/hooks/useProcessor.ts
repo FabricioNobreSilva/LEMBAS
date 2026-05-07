@@ -44,6 +44,9 @@ export interface ProcessorState {
   logContent: string;
   logPath: string;
   logDir: string;
+  isUpdating: boolean;
+  updateProgress: string;
+  updateStarted: boolean;
 }
 
 const INITIAL_STATE: ProcessorState = {
@@ -56,6 +59,9 @@ const INITIAL_STATE: ProcessorState = {
   logContent: "",
   logPath: "",
   logDir: "",
+  isUpdating: false,
+  updateProgress: "",
+  updateStarted: false,
 };
 
 export function useProcessor() {
@@ -193,9 +199,43 @@ export function useProcessor() {
     }
   }, [updateState]);
 
+  const performUpdate = useCallback(async (downloadUrl: string) => {
+    updateState({ isUpdating: true, updateProgress: "Preparando atualização...", updateStarted: false });
+    try {
+      const command = Command.sidecar("binaries/holeritech-backend", [
+        "--mode", "do_update",
+        "--download-url", downloadUrl,
+      ]);
+
+      command.stdout.on("data", (line: string) => {
+        if (!line.trim()) return;
+        try {
+          const event = JSON.parse(line) as { type: string; data: Record<string, unknown> };
+          if (event.type === "update_progress") {
+            updateState({ updateProgress: event.data.message as string });
+          } else if (event.type === "update_started") {
+            updateState({ updateStarted: true, updateProgress: "Instalação em andamento..." });
+          } else if (event.type === "error") {
+            updateState({ isUpdating: false, error: event.data.message as string });
+          }
+        } catch {
+          // ignorar
+        }
+      });
+
+      command.stderr.on("data", (line: string) => {
+        console.warn("[updater stderr]", line);
+      });
+
+      await command.spawn();
+    } catch (err) {
+      updateState({ isUpdating: false, error: `Erro ao iniciar atualização: ${String(err)}` });
+    }
+  }, [updateState]);
+
   const reset = useCallback(() => {
     setState(INITIAL_STATE);
   }, []);
 
-  return { state, processFiles, checkForUpdates, fetchLog, reset };
+  return { state, processFiles, checkForUpdates, fetchLog, reset, performUpdate };
 }

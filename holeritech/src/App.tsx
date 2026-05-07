@@ -28,7 +28,7 @@ export default function App() {
   const [showLog, setShowLog] = useState(false);
   const [dismissedUpdate, setDismissedUpdate] = useState(false);
 
-  const { state, processFiles, checkForUpdates, fetchLog, reset } = useProcessor();
+  const { state, processFiles, checkForUpdates, fetchLog, reset, performUpdate } = useProcessor();
 
   // Verifica atualizações ao iniciar (silenciosamente)
   useEffect(() => {
@@ -56,14 +56,10 @@ export default function App() {
   }, [outputDir, state.summary]);
 
   const handleUpdateClick = useCallback(async () => {
-    if (state.updateInfo?.download_url) {
-      try {
-        await open(state.updateInfo.download_url);
-      } catch {
-        // ignorar
-      }
+    if (state.updateInfo?.download_url && !state.isUpdating) {
+      await performUpdate(state.updateInfo.download_url);
     }
-  }, [state.updateInfo]);
+  }, [state.updateInfo, state.isUpdating, performUpdate]);
 
   const canProcess = inputPaths.length > 0 && outputDir.length > 0 && !state.isProcessing;
   const showProgress = state.isProcessing && state.progress !== null;
@@ -77,27 +73,42 @@ export default function App() {
         <div className="flex items-center justify-between px-4 py-2.5 bg-primary/10 border-b border-primary/20 text-sm shrink-0">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-primary" />
-            <span className="text-foreground">
-              Nova versão disponível:{" "}
-              <span className="font-semibold text-primary">v{state.updateInfo.new_version}</span>
-            </span>
+            {state.updateStarted ? (
+              <span className="text-foreground">
+                Instalando v<span className="font-semibold text-primary">{state.updateInfo.new_version}</span>... O app será reiniciado automaticamente.
+              </span>
+            ) : state.isUpdating ? (
+              <span className="text-foreground">
+                <span className="font-semibold text-primary">{state.updateProgress || "Preparando..."}</span>
+              </span>
+            ) : (
+              <span className="text-foreground">
+                Nova versão disponível:{" "}
+                <span className="font-semibold text-primary">v{state.updateInfo.new_version}</span>
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleUpdateClick}
-              className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Baixar agora
-            </button>
-            <button
-              type="button"
-              onClick={() => setDismissedUpdate(true)}
-              className="p-1 text-muted-foreground hover:text-foreground transition-colors"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
+            {!state.updateStarted && (
+              <button
+                type="button"
+                onClick={handleUpdateClick}
+                disabled={state.isUpdating}
+                className="flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                {state.isUpdating ? "Atualizando..." : "Atualizar agora"}
+              </button>
+            )}
+            {!state.isUpdating && !state.updateStarted && (
+              <button
+                type="button"
+                onClick={() => setDismissedUpdate(true)}
+                className="p-1 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
       )}
