@@ -145,9 +145,25 @@ def do_update(download_url: str, emit_fn: Callable[[str, dict], None]) -> None:
         })
 
         if system == "Windows":
-            # /S = silent install (NSIS). O instalador fecha o app e substitui os arquivos.
+            # Cria um script .bat que aguarda o app fechar antes de instalar,
+            # evitando falha silenciosa por arquivo bloqueado.
+            import textwrap
+            app_exe = "%LOCALAPPDATA%\\Programs\\HoleriTech\\HoleriTech.exe"
+            bat_content = textwrap.dedent(f"""\
+                @echo off
+                :: Aguarda o app fechar completamente
+                timeout /t 5 /nobreak >nul
+                :: Instala silenciosamente
+                "{tmp_path}" /S
+                :: Aguarda a instalação terminar
+                timeout /t 5 /nobreak >nul
+                :: Reabre o aplicativo
+                start "" "{app_exe}"
+            """)
+            bat_path = tmp_path.with_suffix(".bat")
+            bat_path.write_text(bat_content, encoding="utf-8")
             subprocess.Popen(
-                [str(tmp_path), "/S"],
+                ["cmd.exe", "/C", str(bat_path)],
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
             )
