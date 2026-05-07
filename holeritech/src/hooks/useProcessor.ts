@@ -130,8 +130,24 @@ export function useProcessor() {
           }
         });
 
+        const stderrLines: string[] = [];
         command.stderr.on("data", (line: string) => {
-          console.warn("[backend stderr]", line);
+          if (line.trim()) stderrLines.push(line.trim());
+        });
+
+        command.on("close", ({ code }: { code: number | null }) => {
+          // Se o processo fechou sem enviar o evento "summary", libera o estado travado
+          setState((prev) => {
+            if (!prev.isProcessing) return prev;
+            const errMsg = stderrLines.length > 0
+              ? `Processo encerrado inesperadamente (código ${code ?? "??"}):\n${stderrLines.slice(-5).join("\n")}`
+              : `Processo encerrado inesperadamente (código ${code ?? "??"}).\nVerifique o log em HoleriTech\\logs.`;
+            return { ...prev, isProcessing: false, progress: null, error: errMsg };
+          });
+        });
+
+        command.on("error", (err: string) => {
+          updateState({ isProcessing: false, error: `Falha ao executar o backend: ${err}` });
         });
 
         await command.spawn();

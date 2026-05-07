@@ -24,6 +24,17 @@ NAME_LABEL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Tabela com cabeçalho "Código  Nome do Funcionário  CBO  ..."
+TABLE_HEADER_PATTERN = re.compile(
+    r"C[oó]digo\s+Nome\s+do\s+Funcion[aá]rio",
+    re.IGNORECASE,
+)
+
+# Linha de dados da tabela: <código> <NOME EM MAIÚSCULAS> <CBO 6 dígitos> ...
+TABLE_DATA_PATTERN = re.compile(
+    r"^(\d{1,6})\s+([A-ZÁÉÍÓÚÀÂÃÊÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÔÕÜÇA-Za-záéíóúàâãêôõüç\s\-']{4,60}?)\s+\d{4,6}\b"
+)
+
 # Caracteres inválidos para nomes de arquivo (Windows + Unix)
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
@@ -63,29 +74,51 @@ def _sanitize_filename(name: str) -> str:
 def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str]) -> Optional[str]:
     """
     Tenta extrair nome usando heurísticas:
-    1. Procura rótulos conhecidos na mesma região do CPF
-    2. Fallback: captura linha próxima ao CPF
+    1. Procura rótulos inline (Nome: João)
+    2. Procura cabeçalho de tabela "Código Nome do Funcionário" e lê a próxima linha
+    3. Fallback: captura linha próxima ao CPF
     """
-    # Busca por rótulos em todas as linhas
+    # 1. Busca por rótulos inline em todas as linhas
     for line in lines:
         match = NAME_LABEL_PATTERN.search(line)
         if match:
             candidate = match.group(1).strip()
-            # Limpa tokens extras que possam ter vindo junto
             candidate = re.split(r"\s{2,}|\t", candidate)[0].strip()
-            if _is_valid_name(candidate):
+            # Não deixar que o próprio cabeçalho "CBO Departamento" vire nome
+            if _is_valid_name(candidate) and not re.search(r"\b(CBO|Departamento|Filial|Cargo)\b", candidate, re.IGNORECASE):
                 return _sanitize_filename(candidate)
 
-    # Fallback: linha adjacente ao CPF
+    # 2. Cabeçalho de tabela "Código | Nome do Funcionário | CBO ..."
+    for idx, line in enumerate(lines):
+        if TABLE_HEADER_PATTERN.search(line) and idx + 1 < len(lines):
+            data_line = lines[idx + 1].strip()
+            m = TABLE_DATA_PATTERN.match(data_line)
+            if m:
+                candidate = m.group(2).strip()
+                if _is_valid_name(candidate):
+                    return _sanitize_filename(candidate)
+
+    # 3. Fallback: linha adjacente ao CPF
     if cpf_line_idx is not None:
         for offset in range(-3, 4):
-            idx = cpf_line_idx + offset
-            if 0 <= idx < len(lines) and idx != cpf_line_idx:
-                candidate = lines[idx].strip()
+            adj = cpf_line_idx + offset
+            if 0 <= adj < len(lines) and adj != cpf_line_idx:
+                candidate = lines[adj].strip()
                 candidate = re.sub(r"\d", "", candidate).strip()
                 if _is_valid_name(candidate):
                     return _sanitize_filename(candidate)
 
+    return None
+
+
+def _extract_employee_code(lines: list[str]) -> Optional[str]:
+    """Extrai o código numérico do funcionário da tabela quando não há CPF."""
+    for idx, line in enumerate(lines):
+        if TABLE_HEADER_PATTERN.search(line) and idx + 1 < len(lines):
+            data_line = lines[idx + 1].strip()
+            m = TABLE_DATA_PATTERN.match(data_line)
+            if m:
+                return m.group(1)
     return None
 
 
@@ -97,7 +130,7 @@ def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str
 def extract_digital(pdf_path: str) -> Optional[dict]:
     """
     Extrai nome e CPF de um PDF com texto selecionável usando pdfplumber.
-    Retorna {"nome": str, "cpf": str} ou None.
+    Retorna {"nome": str, "cpf": str, "id_type": "cpf"|"codigo"} ou None.
     """
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -118,15 +151,11 @@ def extract_digital(pdf_path: str) -> Optional[dict]:
         for idx, line in enumerate(lines):
             m = CPF_PATTERN.search(line)
             if m:
-                cpf_raw = m.group(0)
-                cpf_line_idx = idx
-                break
-
-        if not cpf_raw:
-            logger.warning(f"CPF não encontrado (digital): {pdf_path}")
-            return None
-
-        cpf = _normalize_cpf(cpf_raw)
+                # Garante que não é CNPJ (14 dígitos com /)
+                if "/" not in line[max(0, m.start()-2):m.end()+2]:
+                    cpf_raw = m.group(0)
+                    cpf_line_idx = idx
+                    break
 
         # Busca nome
         nome = _extract_name_from_text(full_text, cpf_line_idx, lines)
@@ -134,7 +163,18 @@ def extract_digital(pdf_path: str) -> Optional[dict]:
             logger.warning(f"Nome não encontrado (digital): {pdf_path}")
             return None
 
-        return {"nome": nome, "cpf": cpf}
+        if cpf_raw:
+            cpf = _normalize_cpf(cpf_raw)
+            return {"nome": nome, "cpf": cpf, "id_type": "cpf"}
+
+        # Sem CPF: tenta usar o código do funcionário como identificador
+        codigo = _extract_employee_code(lines)
+        if codigo:
+            logger.warning(f"CPF não encontrado, usando código '{codigo}': {pdf_path}")
+            return {"nome": nome, "cpf": f"Cod-{codigo}", "id_type": "codigo"}
+
+        logger.warning(f"CPF não encontrado (digital): {pdf_path}")
+        return None
 
     except Exception as exc:
         logger.error(f"Erro extração digital '{pdf_path}': {exc}")
