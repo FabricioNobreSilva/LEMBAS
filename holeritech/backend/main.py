@@ -32,6 +32,8 @@ def handle_process(args: argparse.Namespace) -> None:
     try:
         input_paths: list[str] = json.loads(args.inputs)
         output_dir: str = args.output
+        extraction_mode: str = getattr(args, "extraction_mode", "auto")
+        on_conflict: str = getattr(args, "on_conflict", "suffix")
     except (json.JSONDecodeError, AttributeError) as e:
         emit("error", {"message": f"Parâmetros inválidos: {e}"})
         sys.exit(1)
@@ -73,6 +75,8 @@ def handle_process(args: argparse.Namespace) -> None:
         input_paths=expanded,
         output_dir=output_dir,
         on_progress=on_progress,
+        extraction_mode=extraction_mode,
+        on_conflict=on_conflict,
     )
 
     emit("summary", {
@@ -97,7 +101,7 @@ def handle_check_update() -> None:
             "release_page_url": update.release_page_url,
         })
     else:
-        emit("no_update", {"current_version": "1.0.0"})
+        emit("no_update", {"current_version": "1.0.2"})
 
 
 def handle_get_log(args: argparse.Namespace) -> None:
@@ -130,6 +134,10 @@ def main() -> None:
     parser.add_argument("--mode", required=True, choices=["process", "check_update", "get_log", "do_update"])
     parser.add_argument("--inputs", default="[]", help="JSON array de caminhos de entrada")
     parser.add_argument("--output", default="", help="Diretório de saída")
+    parser.add_argument("--extraction-mode", default="auto", dest="extraction_mode",
+                        choices=["auto", "digital", "ocr"], help="Modo de extração de texto")
+    parser.add_argument("--on-conflict", default="suffix", dest="on_conflict",
+                        choices=["suffix", "overwrite", "skip"], help="Ação ao haver conflito de nome")
     parser.add_argument("--download-url", default="", dest="download_url", help="URL do instalador para atualização")
     args = parser.parse_args()
 

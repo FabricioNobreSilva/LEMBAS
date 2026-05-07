@@ -18,15 +18,22 @@ import { ProcessButton } from "@/components/ProcessButton";
 import { ProgressBar } from "@/components/ProgressBar";
 import { ResultTable } from "@/components/ResultTable";
 import { LogViewer } from "@/components/LogViewer";
+import { SettingsModal, loadSettings, type AppSettings } from "@/components/SettingsModal";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.2";
+const LAST_FOLDER_KEY = "holeritech_last_folder";
 
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [inputPaths, setInputPaths] = useState<string[]>([]);
-  const [outputDir, setOutputDir] = useState<string>("");
+  const [outputDir, setOutputDir] = useState<string>(() => {
+    const s = loadSettings();
+    return s.rememberLastFolder ? (localStorage.getItem(LAST_FOLDER_KEY) ?? "") : "";
+  });
   const [showLog, setShowLog] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [dismissedUpdate, setDismissedUpdate] = useState(false);
+  const [settings, setSettings] = useState<AppSettings>(loadSettings);
 
   const { state, processFiles, checkForUpdates, fetchLog, reset, performUpdate } = useProcessor();
 
@@ -40,20 +47,26 @@ export default function App() {
     document.documentElement.className = theme === "light" ? "light" : "";
   }, [theme]);
 
+  // Abre pasta automaticamente ao terminar (se configurado)
+  useEffect(() => {
+    if (settings.autoOpenFolder && state.summary && !state.isProcessing && outputDir) {
+      open(outputDir).catch(() => { /* ignorar */ });
+    }
+  }, [state.summary]);
+
   const handleProcess = useCallback(async () => {
     if (inputPaths.length === 0 || !outputDir) return;
-    await processFiles(inputPaths, outputDir);
-  }, [inputPaths, outputDir, processFiles]);
+    if (settings.rememberLastFolder) {
+      localStorage.setItem(LAST_FOLDER_KEY, outputDir);
+    }
+    await processFiles(inputPaths, outputDir, settings.extractionMode, settings.onConflict);
+  }, [inputPaths, outputDir, processFiles, settings]);
 
   const handleOpenOutputDir = useCallback(async () => {
-    if (state.summary?.log_dir || outputDir) {
-      try {
-        await open(outputDir);
-      } catch {
-        // ignorar
-      }
+    if (outputDir) {
+      try { await open(outputDir); } catch { /* ignorar */ }
     }
-  }, [outputDir, state.summary]);
+  }, [outputDir]);
 
   const handleUpdateClick = useCallback(async () => {
     if (state.updateInfo?.download_url && !state.isUpdating) {
@@ -139,6 +152,7 @@ export default function App() {
           </button>
           <button
             type="button"
+            onClick={() => setShowSettings(true)}
             className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
             title="Configurações"
           >
@@ -260,6 +274,14 @@ export default function App() {
         logPath={state.logPath}
         logDir={state.logDir}
         onRefresh={fetchLog}
+      />
+
+      {/* Modal de configurações */}
+      <SettingsModal
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        settings={settings}
+        onChange={setSettings}
       />
     </div>
   );

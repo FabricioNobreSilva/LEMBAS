@@ -74,7 +74,12 @@ export function useProcessor() {
   }, []);
 
   const processFiles = useCallback(
-    async (inputPaths: string[], outputDir: string) => {
+    async (
+      inputPaths: string[],
+      outputDir: string,
+      extractionMode: "auto" | "digital" | "ocr" = "auto",
+      onConflict: "suffix" | "overwrite" | "skip" = "suffix",
+    ) => {
       abortRef.current = false;
       updateState({
         isProcessing: true,
@@ -92,6 +97,10 @@ export function useProcessor() {
           JSON.stringify(inputPaths),
           "--output",
           outputDir,
+          "--extraction-mode",
+          extractionMode,
+          "--on-conflict",
+          onConflict,
         ]);
 
         command.stdout.on("data", (line: string) => {

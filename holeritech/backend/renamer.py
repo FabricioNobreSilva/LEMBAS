@@ -33,6 +33,8 @@ def process_files(
     input_paths: list[str],
     output_dir: str,
     on_progress: Optional[Callable[[FileResult, int, int], None]] = None,
+    extraction_mode: str = "auto",
+    on_conflict: str = "suffix",
 ) -> ProcessSummary:
     """
     Processa uma lista de PDFs: extrai nome+CPF, renomeia e copia para output_dir.
@@ -41,6 +43,8 @@ def process_files(
         input_paths: Lista de caminhos de PDFs.
         output_dir: Diretório de destino.
         on_progress: Callback chamado após cada arquivo processado.
+        extraction_mode: "auto" | "digital" | "ocr"
+        on_conflict: "suffix" | "overwrite" | "skip"
 
     Returns:
         ProcessSummary com estatísticas e resultados.
@@ -60,12 +64,14 @@ def process_files(
             original_name=src.name,
         )
 
-        # --- Modo 1: extração digital ---
-        data = extract_digital(str(src))
-        if data:
-            result.method = "digital"
-        else:
-            # --- Modo 2: OCR ---
+        # --- Extração conforme modo escolhido ---
+        data = None
+        if extraction_mode in ("auto", "digital"):
+            data = extract_digital(str(src))
+            if data:
+                result.method = "digital"
+
+        if data is None and extraction_mode in ("auto", "ocr"):
             data = extract_ocr(str(src))
             if data:
                 result.method = "ocr"
@@ -73,7 +79,23 @@ def process_files(
 
         if data:
             new_filename = f"{data['nome']} - {data['cpf']}.pdf"
-            dest_path = _unique_dest_path(dest_dir, new_filename)
+            dest_path = dest_dir / new_filename
+
+            # --- Trata conflito de nome ---
+            if dest_path.exists():
+                if on_conflict == "skip":
+                    result.status = "warning"
+                    result.new_name = new_filename
+                    result.error_message = "Arquivo já existe no destino — pulado."
+                    logger.warning(f"{src.name} → pulado (já existe: {new_filename})")
+                    summary.warnings += 1
+                    summary.results.append(result)
+                    if on_progress:
+                        on_progress(result, idx, len(input_paths))
+                    continue
+                elif on_conflict == "suffix":
+                    dest_path = _unique_dest_path(dest_dir, new_filename)
+                # on_conflict == "overwrite": usa dest_path como está
 
             try:
                 shutil.copy2(str(src), str(dest_path))
