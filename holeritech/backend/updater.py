@@ -15,7 +15,7 @@ from packaging.version import Version
 from models import UpdateInfo
 
 GITHUB_REPO = "FabricioNobreSilva/LEMBAS"
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.0.1"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 
@@ -145,25 +145,25 @@ def do_update(download_url: str, emit_fn: Callable[[str, dict], None]) -> None:
         })
 
         if system == "Windows":
-            # Cria um script .bat que aguarda o app fechar antes de instalar,
-            # evitando falha silenciosa por arquivo bloqueado.
-            import textwrap
-            app_exe = "%LOCALAPPDATA%\\Programs\\HoleriTech\\HoleriTech.exe"
-            bat_content = textwrap.dedent(f"""\
-                @echo off
-                :: Aguarda o app fechar completamente
-                timeout /t 5 /nobreak >nul
-                :: Instala silenciosamente
-                "{tmp_path}" /S
-                :: Aguarda a instalação terminar
-                timeout /t 5 /nobreak >nul
-                :: Reabre o aplicativo
-                start "" "{app_exe}"
-            """)
-            bat_path = tmp_path.with_suffix(".bat")
-            bat_path.write_text(bat_content, encoding="utf-8")
+            import os
+            app_exe = os.path.join(
+                os.environ.get("LOCALAPPDATA", ""),
+                "Programs", "HoleriTech", "HoleriTech.exe"
+            )
+            # PowerShell: aguarda o processo fechar (Wait-Process) e instala silenciosamente
+            ps_cmd = (
+                f"Wait-Process -Name 'holeritech' -Timeout 60 -ErrorAction SilentlyContinue; "
+                f"Start-Process -FilePath '{tmp_path}' -ArgumentList '/S' -Wait; "
+                f"Start-Sleep -Seconds 3; "
+                f"Start-Process -FilePath '{app_exe}'"
+            )
             subprocess.Popen(
-                ["cmd.exe", "/C", str(bat_path)],
+                [
+                    "powershell.exe",
+                    "-WindowStyle", "Hidden",
+                    "-NonInteractive",
+                    "-Command", ps_cmd,
+                ],
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
             )

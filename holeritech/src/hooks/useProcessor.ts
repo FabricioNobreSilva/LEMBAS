@@ -4,6 +4,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import { Command } from "@tauri-apps/plugin-shell";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type FileStatus = "success" | "warning" | "error" | "processing";
 export type ExtractionMethod = "digital" | "ocr" | "none";
@@ -231,6 +232,8 @@ export function useProcessor() {
             updateState({ updateProgress: event.data.message as string });
           } else if (event.type === "update_started") {
             updateState({ updateStarted: true, updateProgress: "Instalação em andamento..." });
+            // Fecha o app após 3s para liberar os arquivos e permitir a instalação
+            setTimeout(() => getCurrentWindow().close(), 3000);
           } else if (event.type === "error") {
             updateState({ isUpdating: false, error: event.data.message as string });
           }
