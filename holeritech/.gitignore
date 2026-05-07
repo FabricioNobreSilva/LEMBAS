@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.venv/
+build/
+*.spec
+__pycache__/
+*.pyc
+*.pyo
+src-tauri/target/
+src-tauri/binaries/
+!src-tauri/binaries/.gitkeep
+*.log
+.DS_Store
+Thumbs.db
