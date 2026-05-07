@@ -57,7 +57,7 @@ export function DropZone({ selectedPaths, onPathsChange, disabled }: DropZonePro
       setIsDragging(false);
       const files = Array.from(e.dataTransfer.files)
         .filter((f) => f.name.toLowerCase().endsWith(".pdf"))
-        .map((f) => f.path ?? (f as unknown as { path: string }).path);
+        .map((f) => (f as unknown as { path: string }).path);
       if (files.length > 0) {
         onPathsChange(files.filter(Boolean));
       }

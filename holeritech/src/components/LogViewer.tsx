@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { X, FolderOpen, FileText } from "lucide-react";
 import { open } from "@tauri-apps/plugin-shell";
-import { cn } from "@/lib/utils";
 
 interface LogViewerProps {
   isOpen: boolean;

@@ -11,7 +11,6 @@ import {
   AlertCircle,
   X,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { useProcessor } from "@/hooks/useProcessor";
 import { DropZone } from "@/components/DropZone";
 import { DestinationPicker } from "@/components/DestinationPicker";
