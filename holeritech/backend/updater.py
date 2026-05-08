@@ -15,7 +15,7 @@ from packaging.version import Version
 from models import UpdateInfo
 
 GITHUB_REPO = "FabricioNobreSilva/LEMBAS"
-CURRENT_VERSION = "1.0.3"
+CURRENT_VERSION = "1.0.4"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 
@@ -149,7 +149,8 @@ def do_update(download_url: str, emit_fn: Callable[[str, dict], None]) -> None:
             local_app_data = os.environ.get("LOCALAPPDATA", "")
             app_exe = os.path.join(local_app_data, "HoleriTech", "HoleriTech.exe")
             log_path = os.path.join(local_app_data, "HoleriTech", "update.log")
-            # Escreve script .ps1 para evitar problemas de escaping no -Command
+
+            # Escreve o script ps1 de atualização
             ps1_path = tmp_path.with_suffix(".ps1")
             ps1_content = (
                 f'$installer = \'{tmp_path}\'\n'
@@ -169,18 +170,41 @@ def do_update(download_url: str, emit_fn: Callable[[str, dict], None]) -> None:
                 f'}} else {{\n'
                 f'  "[$(Get-Date)] ERRO: $app nao encontrado apos instalacao" | Out-File $log -Append\n'
                 f'}}\n'
+                f'# Remove a tarefa agendada apos execucao\n'
+                f'Unregister-ScheduledTask -TaskName "HoleriTechUpdate" -Confirm:$false -ErrorAction SilentlyContinue\n'
             )
             ps1_path.write_text(ps1_content, encoding="utf-8")
-            subprocess.Popen(
+
+            # Usa o Task Scheduler para garantir execução fora do Job Object do Tauri.
+            # DETACHED_PROCESS não é suficiente — o Job Object mata todos os filhos
+            # quando o app fecha. O Task Scheduler roda em seu próprio contexto.
+            task_name = "HoleriTechUpdate"
+            ps1_escaped = str(ps1_path).replace("'", "''")
+            task_cmd = (
+                f"powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File '{ps1_escaped}'"
+            )
+            # Remove tarefa anterior se existir
+            subprocess.run(
+                ["schtasks", "/delete", "/tn", task_name, "/f"],
+                capture_output=True,
+            )
+            # Cria a tarefa para rodar uma vez agora
+            subprocess.run(
                 [
-                    "powershell.exe",
-                    "-WindowStyle", "Hidden",
-                    "-NonInteractive",
-                    "-ExecutionPolicy", "Bypass",
-                    "-File", str(ps1_path),
+                    "schtasks", "/create",
+                    "/tn", task_name,
+                    "/tr", task_cmd,
+                    "/sc", "ONCE",
+                    "/st", "00:00",
+                    "/f",
+                    "/rl", "HIGHEST",
                 ],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
+                capture_output=True,
+            )
+            # Dispara imediatamente
+            subprocess.run(
+                ["schtasks", "/run", "/tn", task_name],
+                capture_output=True,
             )
         elif system == "Darwin":
             subprocess.Popen(["open", str(tmp_path)])
