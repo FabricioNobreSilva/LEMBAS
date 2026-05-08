@@ -5,11 +5,20 @@ Comunicação com o frontend Tauri via stdout (JSON line-by-line).
 """
 
 import argparse
+import io
 import json
 import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
+
+# Força UTF-8 no stdout/stderr para compatibilidade com Tauri no Windows.
+# Sem isso, Python usa o codepage do sistema (cp1252) e caracteres como ã/é
+# produzem bytes inválidos que quebram o decodificador UTF-8 do Tauri.
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", line_buffering=True)
+if hasattr(sys.stderr, "buffer"):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", line_buffering=True)
 
 # Garante que o diretório do script esteja no path (necessário no PyInstaller)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -101,7 +110,7 @@ def handle_check_update() -> None:
             "release_page_url": update.release_page_url,
         })
     else:
-        emit("no_update", {"current_version": "1.0.4"})
+        emit("no_update", {"current_version": "1.0.5"})
 
 
 def handle_get_log(args: argparse.Namespace) -> None:

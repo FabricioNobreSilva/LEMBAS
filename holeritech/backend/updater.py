@@ -15,7 +15,7 @@ from packaging.version import Version
 from models import UpdateInfo
 
 GITHUB_REPO = "FabricioNobreSilva/LEMBAS"
-CURRENT_VERSION = "1.0.4"
+CURRENT_VERSION = "1.0.5"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 
@@ -197,7 +197,6 @@ def do_update(download_url: str, emit_fn: Callable[[str, dict], None]) -> None:
                     "/sc", "ONCE",
                     "/st", "00:00",
                     "/f",
-                    "/rl", "HIGHEST",
                 ],
                 capture_output=True,
             )
