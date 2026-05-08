@@ -146,23 +146,38 @@ def do_update(download_url: str, emit_fn: Callable[[str, dict], None]) -> None:
 
         if system == "Windows":
             import os
-            app_exe = os.path.join(
-                os.environ.get("LOCALAPPDATA", ""),
-                "Programs", "HoleriTech", "HoleriTech.exe"
+            local_app_data = os.environ.get("LOCALAPPDATA", "")
+            app_exe = os.path.join(local_app_data, "HoleriTech", "HoleriTech.exe")
+            log_path = os.path.join(local_app_data, "HoleriTech", "update.log")
+            # Escreve script .ps1 para evitar problemas de escaping no -Command
+            ps1_path = tmp_path.with_suffix(".ps1")
+            ps1_content = (
+                f'$installer = \'{tmp_path}\'\n'
+                f'$app = \'{app_exe}\'\n'
+                f'$log = \'{log_path}\'\n'
+                f'"[$(Get-Date)] Aguardando processo holeritech fechar..." | Out-File $log -Append\n'
+                f'$proc = Get-Process -Name "holeritech" -ErrorAction SilentlyContinue\n'
+                f'if ($proc) {{ $proc | Wait-Process -Timeout 60 -ErrorAction SilentlyContinue }}\n'
+                f'Start-Sleep -Seconds 2\n'
+                f'"[$(Get-Date)] Iniciando instalador: $installer" | Out-File $log -Append\n'
+                f'$p = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru\n'
+                f'"[$(Get-Date)] Instalador saiu com codigo: $($p.ExitCode)" | Out-File $log -Append\n'
+                f'Start-Sleep -Seconds 4\n'
+                f'if (Test-Path $app) {{\n'
+                f'  "[$(Get-Date)] Abrindo: $app" | Out-File $log -Append\n'
+                f'  Start-Process -FilePath $app\n'
+                f'}} else {{\n'
+                f'  "[$(Get-Date)] ERRO: $app nao encontrado apos instalacao" | Out-File $log -Append\n'
+                f'}}\n'
             )
-            # PowerShell: aguarda o processo fechar (Wait-Process) e instala silenciosamente
-            ps_cmd = (
-                f"Wait-Process -Name 'holeritech' -Timeout 60 -ErrorAction SilentlyContinue; "
-                f"Start-Process -FilePath '{tmp_path}' -ArgumentList '/S' -Wait; "
-                f"Start-Sleep -Seconds 3; "
-                f"Start-Process -FilePath '{app_exe}'"
-            )
+            ps1_path.write_text(ps1_content, encoding="utf-8")
             subprocess.Popen(
                 [
                     "powershell.exe",
                     "-WindowStyle", "Hidden",
                     "-NonInteractive",
-                    "-Command", ps_cmd,
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", str(ps1_path),
                 ],
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
