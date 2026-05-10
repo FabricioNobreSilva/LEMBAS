@@ -51,13 +51,14 @@ def handle_process(args: argparse.Namespace) -> None:
         emit("error", {"message": "Nenhum arquivo selecionado."})
         sys.exit(1)
 
-    # Expande pastas para lista de PDFs
+    # Expande pastas para lista de PDFs (sem duplicatas — no Windows *.pdf já captura .PDF)
     expanded: list[str] = []
     for p in input_paths:
         path = Path(p)
         if path.is_dir():
-            expanded.extend(str(f) for f in sorted(path.glob("*.pdf")))
-            expanded.extend(str(f) for f in sorted(path.glob("*.PDF")))
+            for f in sorted(path.iterdir()):
+                if f.is_file() and f.suffix.lower() == ".pdf":
+                    expanded.append(str(f))
         elif path.is_file() and path.suffix.lower() == ".pdf":
             expanded.append(str(path))
 
@@ -110,7 +111,7 @@ def handle_check_update() -> None:
             "release_page_url": update.release_page_url,
         })
     else:
-        emit("no_update", {"current_version": "1.0.7"})
+        emit("no_update", {"current_version": "1.0.8"})
 
 
 def handle_get_log(args: argparse.Namespace) -> None:

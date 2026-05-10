@@ -20,7 +20,7 @@ import { ResultTable } from "@/components/ResultTable";
 import { LogViewer } from "@/components/LogViewer";
 import { SettingsModal, loadSettings, type AppSettings } from "@/components/SettingsModal";
 
-const APP_VERSION = "1.0.7";
+const APP_VERSION = "1.0.8";
 const LAST_FOLDER_KEY = "holeritech_last_folder";
 
 export default function App() {

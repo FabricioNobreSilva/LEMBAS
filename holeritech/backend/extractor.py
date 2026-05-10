@@ -30,6 +30,21 @@ TABLE_HEADER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Cabeçalho formato BRZ: "Matrícula  Nome"
+MATRICULA_HEADER_PATTERN = re.compile(
+    r"\bMatr[íi]cula\b.*\bNome\b",
+    re.IGNORECASE,
+)
+
+# Linhas de rótulos de campos que NUNCA devem ser confundidas com nomes de pessoas
+FIELD_LABEL_EXCLUSION_PATTERN = re.compile(
+    r"\b(CPF|PIS|IRRF|INSS|Matr[íi]cula|Identidade|Contribui[çc][aã]o"
+    r"|Sal[aá]rio|Banco|Ag[eê]ncia|Conta|Compet[eê]ncia|Admiss[aã]o"
+    r"|Fun[çc][aã]o|Descri[çc][aã]o|Refer[eê]ncia|Vencimento|Desconto"
+    r"|Sigla|Verba|C[Oo]ntrib|Período|Filial|Departamento|CBO)\b",
+    re.IGNORECASE,
+)
+
 # Linha de dados da tabela: <código> <NOME EM MAIÚSCULAS> <CBO 6 dígitos> ...
 TABLE_DATA_PATTERN = re.compile(
     r"^(\d{1,6})\s+([A-ZÁÉÍÓÚÀÂÃÊÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÔÕÜÇA-Za-záéíóúàâãêôõüç\s\-']{4,60}?)\s+\d{4,6}\b"
@@ -110,6 +125,13 @@ def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str
             if nome_tabela and _is_valid_name(nome_tabela):
                 return _sanitize_filename(nome_tabela)
 
+    # 2.5. Cabeçalho formato BRZ: "Matrícula Nome" + linha com <MATRÍCULA> <NOME COMPLETO>
+    for idx, line in enumerate(lines):
+        if MATRICULA_HEADER_PATTERN.search(line) and idx + 1 < len(lines):
+            nome_mat, _ = _extract_from_matricula_line(lines[idx + 1].strip())
+            if nome_mat and _is_valid_name(nome_mat):
+                return _sanitize_filename(nome_mat)
+
     # 3. Fallback: linha adjacente ao CPF (prefere linhas ANTES, onde o nome costuma estar)
     if cpf_line_idx is not None:
         # Primeiro varre antes do CPF, depois depois — nomes precedem CPF na maioria dos layouts
@@ -126,7 +148,11 @@ def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str
             # Remove pontuação residual típica de endereços (vírgulas, hífens soltos)
             candidate = re.sub(r"[,;]", " ", candidate).strip()
             candidate = " ".join(candidate.split())
-            if _is_valid_name(candidate) and not ADDRESS_LINE_PATTERN.search(candidate):
+            if (
+                _is_valid_name(candidate)
+                and not ADDRESS_LINE_PATTERN.search(candidate)
+                and not FIELD_LABEL_EXCLUSION_PATTERN.search(raw_line)
+            ):
                 return _sanitize_filename(candidate)
 
     return None
@@ -175,6 +201,22 @@ def _extract_from_table_line(data_line: str) -> tuple[Optional[str], Optional[st
     return ' '.join(name_words), code
 
 
+def _extract_from_matricula_line(data_line: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Extrai (nome, matrícula) de linha no formato BRZ: '<MATRÍCULA> <NOME COMPLETO>'.
+    Exemplo: '00500039 FABIANO ALVES DE ALMEIDA SANTOS'
+    """
+    m = re.match(
+        r'^(\d+)\s+([A-ZÁÉÍÓÚÀÂÃÊÔÕÜÇ][A-ZÁÉÍÓÚÀÂÃÊÔÕÜÇA-Za-záéíóúàâãêôõüç\s\-\']+)',
+        data_line.strip(),
+    )
+    if m:
+        name = m.group(2).strip()
+        if _is_valid_name(name):
+            return name, m.group(1)
+    return None, None
+
+
 def _extract_employee_code(lines: list[str]) -> Optional[str]:
     """Extrai o código numérico do funcionário da tabela quando não há CPF."""
     for idx, line in enumerate(lines):
@@ -182,7 +224,89 @@ def _extract_employee_code(lines: list[str]) -> Optional[str]:
             _, code = _extract_from_table_line(lines[idx + 1].strip())
             if code:
                 return code
+        if MATRICULA_HEADER_PATTERN.search(line) and idx + 1 < len(lines):
+            _, code = _extract_from_matricula_line(lines[idx + 1].strip())
+            if code:
+                return code
     return None
+
+
+# ---------------------------------------------------------------------------
+# Suporte a PDFs multi-funcionário (um funcionário por página)
+# ---------------------------------------------------------------------------
+
+
+def is_per_page_employee_pdf(pdf_path: str) -> bool:
+    """
+    Retorna True se o PDF parece ter um funcionário por página (ex: formato BRZ).
+    Critério: cabeçalho 'Matrícula Nome' presente em pelo menos 2 das 4 primeiras páginas.
+    """
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            if len(pdf.pages) < 2:
+                return False
+            headers_found = sum(
+                1 for page in pdf.pages[:4]
+                if MATRICULA_HEADER_PATTERN.search(page.extract_text() or "")
+            )
+            return headers_found >= 2
+    except Exception:
+        return False
+
+
+def extract_digital_all_pages(pdf_path: str) -> list[dict]:
+    """
+    Para PDFs com um funcionário por página: extrai nome+CPF de cada página.
+    Retorna lista de {"nome", "cpf", "id_type", "page_index"} para cada página com sucesso.
+    """
+    results: list[dict] = []
+    try:
+        with pdfplumber.open(pdf_path) as pdf:
+            for page_index, page in enumerate(pdf.pages):
+                text = page.extract_text() or ""
+                if not text.strip():
+                    continue
+                lines = text.splitlines()
+
+                # Busca CPF
+                cpf_raw = None
+                cpf_line_idx = None
+                for idx, line in enumerate(lines):
+                    m = CPF_PATTERN.search(line)
+                    if m and "/" not in line[max(0, m.start() - 2):m.end() + 2]:
+                        cpf_raw = m.group(0)
+                        cpf_line_idx = idx
+                        break
+
+                nome = _extract_name_from_text(text, cpf_line_idx, lines)
+                if not nome:
+                    logger.warning(f"Nome não encontrado na pág. {page_index}: {pdf_path}")
+                    continue
+
+                if cpf_raw:
+                    item: dict = {
+                        "nome": nome,
+                        "cpf": _normalize_cpf(cpf_raw),
+                        "id_type": "cpf",
+                        "page_index": page_index,
+                    }
+                else:
+                    codigo = _extract_employee_code(lines)
+                    if codigo:
+                        item = {
+                            "nome": nome,
+                            "cpf": f"Cod-{codigo}",
+                            "id_type": "codigo",
+                            "page_index": page_index,
+                        }
+                    else:
+                        logger.warning(f"CPF e código não encontrados na pág. {page_index}: {pdf_path}")
+                        continue
+
+                results.append(item)
+    except Exception as exc:
+        logger.error(f"Erro na extração multi-página de '{pdf_path}': {exc}")
+    return results
 
 
 # ---------------------------------------------------------------------------
