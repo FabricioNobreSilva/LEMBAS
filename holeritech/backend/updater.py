@@ -15,7 +15,7 @@ from packaging.version import Version
 from models import UpdateInfo
 
 GITHUB_REPO = "FabricioNobreSilva/LEMBAS"
-CURRENT_VERSION = "1.0.5"
+CURRENT_VERSION = "1.0.6"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 

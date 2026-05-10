@@ -38,6 +38,14 @@ TABLE_DATA_PATTERN = re.compile(
 # Caracteres inválidos para nomes de arquivo (Windows + Unix)
 INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
 
+# Palavras que indicam linha de endereço (não devem ser confundidas com nomes)
+ADDRESS_LINE_PATTERN = re.compile(
+    r"\b(Rua|Av\.?|Avenida|Alameda|Travessa|Viela|Rodovia|Estr\.?|Estrada"
+    r"|Bairro|CEP|Endere[çc]o|Logradouro|Cx\.?\s*Postal"
+    r"|n[°º]?\.?\s*\d|Bloco|Apto\.?|Apartamento|Complemento)\b",
+    re.IGNORECASE,
+)
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -84,8 +92,12 @@ def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str
         if match:
             candidate = match.group(1).strip()
             candidate = re.split(r"\s{2,}|\t", candidate)[0].strip()
-            # Não deixar que o próprio cabeçalho "CBO Departamento" vire nome
-            if _is_valid_name(candidate) and not re.search(r"\b(CBO|Departamento|Filial|Cargo)\b", candidate, re.IGNORECASE):
+            # Não deixar que cabeçalhos ou endereços virem nome
+            if (
+                _is_valid_name(candidate)
+                and not re.search(r"\b(CBO|Departamento|Filial|Cargo)\b", candidate, re.IGNORECASE)
+                and not ADDRESS_LINE_PATTERN.search(candidate)
+            ):
                 return _sanitize_filename(candidate)
 
     # 2. Cabeçalho de tabela "Código | Nome do Funcionário | CBO ..."
@@ -98,15 +110,24 @@ def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str
                 if _is_valid_name(candidate):
                     return _sanitize_filename(candidate)
 
-    # 3. Fallback: linha adjacente ao CPF
+    # 3. Fallback: linha adjacente ao CPF (prefere linhas ANTES, onde o nome costuma estar)
     if cpf_line_idx is not None:
-        for offset in range(-3, 4):
+        # Primeiro varre antes do CPF, depois depois — nomes precedem CPF na maioria dos layouts
+        offsets = list(range(-1, -4, -1)) + list(range(1, 4))
+        for offset in offsets:
             adj = cpf_line_idx + offset
-            if 0 <= adj < len(lines) and adj != cpf_line_idx:
-                candidate = lines[adj].strip()
-                candidate = re.sub(r"\d", "", candidate).strip()
-                if _is_valid_name(candidate):
-                    return _sanitize_filename(candidate)
+            if not (0 <= adj < len(lines)):
+                continue
+            raw_line = lines[adj].strip()
+            # Ignora linhas que parecem endereço antes mesmo de remover dígitos
+            if ADDRESS_LINE_PATTERN.search(raw_line):
+                continue
+            candidate = re.sub(r"\d", "", raw_line).strip()
+            # Remove pontuação residual típica de endereços (vírgulas, hífens soltos)
+            candidate = re.sub(r"[,;]", " ", candidate).strip()
+            candidate = " ".join(candidate.split())
+            if _is_valid_name(candidate) and not ADDRESS_LINE_PATTERN.search(candidate):
+                return _sanitize_filename(candidate)
 
     return None
 
