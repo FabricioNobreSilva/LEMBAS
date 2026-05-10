@@ -110,7 +110,7 @@ def handle_check_update() -> None:
             "release_page_url": update.release_page_url,
         })
     else:
-        emit("no_update", {"current_version": "1.0.6"})
+        emit("no_update", {"current_version": "1.0.7"})
 
 
 def handle_get_log(args: argparse.Namespace) -> None:

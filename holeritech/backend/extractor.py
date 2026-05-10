@@ -24,9 +24,9 @@ NAME_LABEL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Tabela com cabeçalho "Código  Nome do Funcionário  CBO  ..."
+# Tabela com cabeçalho "Código  Nome do Funcionário/Trabalhador  CBO  ..."
 TABLE_HEADER_PATTERN = re.compile(
-    r"C[oó]digo\s+Nome\s+do\s+Funcion[aá]rio",
+    r"C[oó]digo\s+Nome\s+do\s+(?:Funcion[aá]rio|[Tt]rabalhador)",
     re.IGNORECASE,
 )
 
@@ -95,20 +95,20 @@ def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str
             # Não deixar que cabeçalhos ou endereços virem nome
             if (
                 _is_valid_name(candidate)
-                and not re.search(r"\b(CBO|Departamento|Filial|Cargo)\b", candidate, re.IGNORECASE)
+                and not re.search(
+                    r"\b(CBO|Departamento|Filial|Cargo|[Tt]rabalhador|Local\s+de)\b",
+                    candidate, re.IGNORECASE
+                )
                 and not ADDRESS_LINE_PATTERN.search(candidate)
             ):
                 return _sanitize_filename(candidate)
 
-    # 2. Cabeçalho de tabela "Código | Nome do Funcionário | CBO ..."
+    # 2. Cabeçalho de tabela "Código | Nome do Funcionário/Trabalhador | CBO ..."
     for idx, line in enumerate(lines):
         if TABLE_HEADER_PATTERN.search(line) and idx + 1 < len(lines):
-            data_line = lines[idx + 1].strip()
-            m = TABLE_DATA_PATTERN.match(data_line)
-            if m:
-                candidate = m.group(2).strip()
-                if _is_valid_name(candidate):
-                    return _sanitize_filename(candidate)
+            nome_tabela, _ = _extract_from_table_line(lines[idx + 1].strip())
+            if nome_tabela and _is_valid_name(nome_tabela):
+                return _sanitize_filename(nome_tabela)
 
     # 3. Fallback: linha adjacente ao CPF (prefere linhas ANTES, onde o nome costuma estar)
     if cpf_line_idx is not None:
@@ -132,14 +132,56 @@ def _extract_name_from_text(text: str, cpf_line_idx: int | None, lines: list[str
     return None
 
 
+# Partículas que podem aparecer em nomes brasileiros (não são abreviações de setor)
+_NAME_PARTICLES = {'DA', 'DE', 'DO', 'DOS', 'DAS', 'E', 'DI', 'DEL', 'EM', 'NA', 'NO', 'NAS', 'NOS'}
+
+
+def _extract_from_table_line(data_line: str) -> tuple[Optional[str], Optional[str]]:
+    """
+    Extrai (nome, código) de uma linha de dados de tabela de funcionários.
+    Suporta dois formatos:
+      - '22 DAVI MARINHO DA SILVA 317210 1 1'       (código CBO numérico após nome)
+      - '323 FABRICIO NOBRE DA SILVA DHO - ALPHAVILLE' (local de trabalho após nome)
+    """
+    # Formato 1: código numérico CBO após o nome (padrão mais comum)
+    m = TABLE_DATA_PATTERN.match(data_line)
+    if m:
+        return m.group(2).strip(), m.group(1)
+
+    # Formato 2: departamento/local de trabalho após o nome (ex: "DHO - ALPHAVILLE")
+    head = re.match(r'^(\d{1,6})\s+', data_line)
+    if not head:
+        return None, None
+    code = head.group(1)
+    rest = data_line[head.end():]
+
+    name_words: list[str] = []
+    for word in rest.split():
+        # Para em dígito (código numérico) ou pontuação pura
+        if re.match(r'^\d', word):
+            break
+        if not re.search(r'[A-Za-záéíóúàâãêôõüçÁÉÍÓÚÀÂÃÊÔÕÜÇ]', word):
+            break
+        upper = word.upper()
+        # Palavra curta em maiúsculas que NÃO é partícula → provável abreviação de setor
+        if name_words and len(word) <= 4 and word.isupper() and upper not in _NAME_PARTICLES:
+            real = [w for w in name_words if w.upper() not in _NAME_PARTICLES]
+            if len(real) >= 2:
+                break
+        name_words.append(word)
+
+    if not name_words:
+        return None, code
+    return ' '.join(name_words), code
+
+
 def _extract_employee_code(lines: list[str]) -> Optional[str]:
     """Extrai o código numérico do funcionário da tabela quando não há CPF."""
     for idx, line in enumerate(lines):
         if TABLE_HEADER_PATTERN.search(line) and idx + 1 < len(lines):
-            data_line = lines[idx + 1].strip()
-            m = TABLE_DATA_PATTERN.match(data_line)
-            if m:
-                return m.group(1)
+            _, code = _extract_from_table_line(lines[idx + 1].strip())
+            if code:
+                return code
     return None
 
 
